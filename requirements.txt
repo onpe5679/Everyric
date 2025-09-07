@@ -1,0 +1,6 @@
+# 프로젝트 의존성
+
+yt-dlp>=2025.6.1
+git+https://github.com/openai/whisper.git@main
+openai>=0.27.0
+torch>=2.0.0
