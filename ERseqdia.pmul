@@ -1,0 +1,84 @@
+@startuml Everyric Sequence Diagram
+!theme plain
+title Everyric - 음성 자막 생성 시퀀스 다이어그램
+
+actor User as U
+participant "CLI (main)" as CLI
+participant "audio.downloader" as DL
+participant "text.lyrics" as LY
+participant "audio.processor" as AP
+participant "align.simple_aligner" as AL
+participant "output.formatter" as OF
+participant "YouTube/Local File" as YT
+participant "Whisper Model" as WM
+participant "File System" as FS
+
+U -> CLI: python cli.py --audio URL --lyrics lyrics.txt --output output
+activate CLI
+
+CLI -> CLI: parse_args()
+CLI -> U: [Everyric] Audio: URL
+CLI -> U: [Everyric] Lyrics: lyrics.txt
+CLI -> U: [Everyric] Output: output
+
+== Audio Download Phase ==
+CLI -> DL: download_audio(audio_url, output_dir)
+activate DL
+DL -> FS: makedirs(output_dir)
+DL -> YT: YoutubeDL.extract_info(url)
+activate YT
+YT --> DL: video_info + audio_stream
+deactivate YT
+DL -> FS: save audio file
+DL --> CLI: audio_file_path
+deactivate DL
+
+== Lyrics Parsing Phase ==
+CLI -> LY: parse_lyrics(lyrics_file)
+activate LY
+LY -> FS: open(lyrics_file, 'r')
+FS --> LY: file_content
+LY -> LY: split lines + strip
+LY --> CLI: lyrics_lines[]
+deactivate LY
+
+== Audio Transcription Phase ==
+CLI -> AP: transcribe_audio(audio_path)
+activate AP
+AP -> WM: whisper.load_model("tiny")
+activate WM
+WM --> AP: loaded_model
+deactivate WM
+AP -> WM: model.transcribe(audio_path)
+activate WM
+WM -> WM: audio processing + speech recognition
+WM --> AP: transcription_result
+deactivate WM
+AP -> AP: extract segments with timestamps
+AP --> CLI: segments[]
+deactivate AP
+
+== Alignment Phase ==
+CLI -> AL: align_segments(lyrics_lines, segments)
+activate AL
+AL -> AL: match lyrics with audio segments
+loop for each lyric line
+    AL -> AL: map to corresponding segment
+    AL -> AL: extract start/end timestamps
+end
+AL --> CLI: aligned_segments[]
+deactivate AL
+
+== Output Generation Phase ==
+CLI -> OF: format_json(aligned_segments, output_dir)
+activate OF
+OF -> FS: makedirs(output_dir)
+OF -> FS: write subtitles.json
+FS --> OF: file_saved
+OF --> CLI: output_file_path
+deactivate OF
+
+CLI -> U: 자막 파일 생성 완료: output_file_path
+deactivate CLI
+
+@enduml
