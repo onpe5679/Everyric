@@ -1,0 +1,120 @@
+@startuml Everyric Activity Diagram
+title Everyric - 음성 자막 생성 액티비티 다이어그램 (v2.1)
+
+skinparam shadowing false
+skinparam monochrome false
+skinparam activity {
+  BorderColor #555555
+  BackgroundColor #F8F8F8
+  ArrowColor #888888
+}
+!theme plain
+
+start
+
+' 1) 설정 로드
+:시작(사용자 실행);
+:설정 파일 경로 확인(--config);
+:설정 로드(load_config) 및 유효성 검사;
+
+if (오디오 소스 존재?) then (예)
+else (아니오)
+  :에러 로그 및 종료;
+  stop
+endif
+
+' 2) 출력 폴더 구성
+:동적 출력 폴더 생성(create_dynamic_output_folder);
+:API 키 제거된 config 스냅샷 저장;
+
+' 3) 오디오 다운로드/로드
+:오디오 다운로드/변환(download_audio);
+note right
+- YouTube/로컬 파일 입력
+- 필요 시 WAV로 변환
+end note
+
+' 4) (선택) 보컬 분리
+if (vocal_separation == true?) then (예)
+  :Demucs 보컬 분리(separate_vocals);
+  :보컬/반주 파일 저장(audio_vocals.wav / audio_no_vocals.wav);
+  :Whisper 입력을 보컬 파일로 교체;
+else (아니오)
+  :보컬 분리 단계 스킵;
+endif
+
+' 5) ASR 엔진 분기
+if (asr_engine == "whisperx"?) then (WhisperX)
+  :WhisperX 전사+정렬(transcribe_audio_with_whisperx);
+  :세그먼트(segments) 획득(단어 words[] 포함 가능);
+
+  ' (선택) VAD 보정
+  if (enable_vad_timing_correction?) then (예)
+    :무성구간 감지(detect_silence_segments);
+    :타이밍 보정(apply_silence_based_timing_correction);
+  else (아니오)
+    :보정 스킵;
+  endif
+
+  ' 디버그/원본 보존
+  :ASR 원본 세그먼트 저장(asr_whisperx_*.json/txt);
+  :WhisperX-only 디버그 자막 저장({asr_debug_prefix}_*.srt/json);
+  :정밀(단어단위) 자막 - 보정 전 저장({whisperx_precise_prefix_prevad}_*.srt/json);
+  :정밀(단어단위) 자막 - 보정 후 저장({whisperx_precise_prefix_postvad}_*.srt/json);
+
+else (Whisper)
+  :Whisper 전사(transcribe_audio);
+  :ASR 원본 세그먼트 저장(asr_whisper_*.json/txt);
+endif
+
+' 6) (선택) 가사 기반 정렬 파이프라인
+if (lyrics 파일 지정?) then (예)
+  :가사 로드(parse_lyrics);
+  if (alignment_engine == "llm"?) then (LLM)
+    :LLM 정렬 요청(LLMOnlyAligner.align_lyrics_with_timing);
+    :유사도 통계 수집(overall/average/range);
+  else (DTW)
+    :스마트 정렬(SmartAligner.align_lyrics_with_timing);
+  endif
+  :정렬 결과 aligned_subtitles 생성;
+
+  ' (선택) 번역
+  if (translate == true?) then (예)
+    :번역 엔진 선택(gemini | gpt);
+    :가사 번역 실행(안전 폴백 포함);
+  else (아니오)
+    :번역 스킵;
+  endif
+
+  ' (선택) 발음 표기
+  if (pronunciation == true?) then (예)
+    :LLM 발음 변환(LLMPronunciationConverter);
+  else (아니오)
+    :발음 스킵;
+  endif
+
+  ' 파일 출력
+  :SRT/JSON 생성(save_aligned_subtitles);
+
+else (아니오)
+  :전사 텍스트만 저장(save_transcription_text);
+endif
+
+' 7) (선택) 시각화 디버그 이미지
+if (enable_visual_diagnostics == true?) then (예)
+  :진단 이미지 생성(render_diagnostics_image);
+  note right
+  좌측: 원본/보조(RMS 바 + 무성구간)
+  중앙: 최종가사 타임바
+  우중: WhisperX 타임바
+  우측: 원본가사 라인업
+  상단: LLM 유사도 통계(Overall/Avg/Range)
+  end note
+else (아니오)
+  :시각화 스킵;
+endif
+
+' 8) 완료
+:완료 로그 및 산출물 경로 표시;
+stop
+@enduml
